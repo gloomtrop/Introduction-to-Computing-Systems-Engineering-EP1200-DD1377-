@@ -1,0 +1,195 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+// -------------------------------------------------------------------------
+// ANTECKNINGAR
+
+// Avkoda instruktioner:
+// Instruktionen är en 16 - bit ord 
+// Kan representeras som en A-instruktion eller C-instruktion
+// Ordet kan brytas ner på följande sätt -> ixx a cccccc ddd jjj
+// Om i = 0 A-inst. ; Om i = 1 C-inst.
+// För C instruktion________
+// a ccc ccc är beräkningsdelen av ordet
+// ddd är destinationen för ordet
+// jjj är hur man ska fortsätta utförandet med de intruktioner som var adresserad
+// från A registret där outputen från ALU bestämmer om detta blir fallet eller inte
+// För A instruktion__________
+// Allt för utom i-biten tolkas som en 15-bit konstant
+
+// Utföra instruktioner:
+// i-, a-, c-, d- och j-bitarna är kopplade samtidigt till olika delar i
+// arkitekturen för att beordra chipen i kretsen att göra vad de ska.
+// Det kan antingen vara en A-instruktion eller C-instruktion.
+// a-biten bestämmer om ALUn kommer hantera A registerns input eller Minnesinput
+// c-bitarna bestämmer vilken funktion som ALUn kommmer att beräkna
+// d-bitarna möjliggör olika register att acceptera ALUns resultat
+
+// Nästa instruktionshämtning:
+// Som en bieffekt av utförandet för den nuvarande instruktioner är att
+// CPUn också bestämmer adressen för nästa instruktion och skickas ut via dess
+// PC output. Standard utförandet för Programräknaren är PC(t) =PC(t+1)+1.
+// När vi vill påverka ett "goto n" utförande, maskinkodens specifikationer kräver
+// att A regisret sätts till n och sen utfärdar ett hoppdirektiv (mha j-bits).
+// Därmed krävs det att. Om JUMP(t), då är PC(t)=A(t-1) annars PC(t) =PC(t-1)+1
+// Detta görs möjligt med kopplingen av CPUn. 
+// Enda frågan är när PCn ska få hantera detta värde. Det är en funktion av två
+// signaler: (a) j-bits instruerar på vilket villkor vi ska hoppa.
+// (b) ALUns output statusbitar indikerar om villkoret är uppfyllt.
+// Om vi har ett hopp ska PCn laddas det med As instruktioner. 
+// Annars ska PCn inkrementeras med 1.
+
+// -------------------------------------------------------------------------
+// FUNKTIONER ATT ANVÄNDA
+// ARegister(in= ,load= ,out= ); 
+// in[16], load[1], out[16]
+// DRegister(in= ,load= ,out= ); 
+// in[16], load[1], out[16]
+// Mux16(a= ,b= ,sel= ,out= ); 
+// a[16], b[16], sel[1], out[16]
+// ALU(x= ,y= ,zx= ,nx= ,zy= ,ny= ,f= ,no= ,out= ,zr= ,ng= );
+// x[16], y[16], zx, nx, zy, ny, f, no,zr, ng= 1-bit, out[16], 
+// PC(in= ,load= ,inc= ,reset= ,out= );
+// in[16], inc, load, reset = 1-bit, out[16]
+
+
+// Uppkommna frågor
+// Vad får ALUn att beräkna? Svar: ALUn beräknar i vilket fall, det är bara att varje kontrollbit är 0 vid en A-instruktion.
+// I vilket fall görs ett hopp? Svar: Om input instruktionen säger det samt att det är en C-instruktion. Beror även vad ALUns output är. Se tabell sida 69.
+// Vad är skillnaden mellan en C-instruktion och A-instruktion? Svar: Skillnaden är den 16e biten som vid C-inst. är 1 och A-inst. är 0. 
+// Samtidigt tolkas As 15 andra bitar som en konstant.
+// Följdfråga: Vad sker det för konsekvenser i kretsen? Vid en A-instruktion sparas bara instruktionen i A registeret. För en C-instruktion görs Hopp, Spara i D etc.
+	
+// INSTRUKTION
+// Avkodningen av instruktioner
+// Problem: uppdelningen av ordet måste ske och subordet skickas till
+// respektive chip som kontrollbitar 
+//........................................................
+
+// instruction[0..2] = jump
+// instruction[3..5] = destination
+// instruction[6..11] = compute
+// instruction[12] = a A/M compute
+// instruction[13..14] = xx
+// instruction[15] = i (A- or C-inst)
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Put your code here:
+
+	// (DECODING)
+	// Kommentar: Delar upp intruktionen i olika delar beroende av funktionalitet
+	Not16(in= instruction, out= notinst, out[15]=notouti);
+	Not16(in= notinst, out[12]= outa, out[15] = outi, out = inst);
+	
+	// (Mux1) 
+	// Input = instruction, ALU-output; Output = A.reg-input
+	// Kommentar: Här kollas om det är en A- eller C-instruktion
+	// Om i-biten är 0->A-inst, 1->C-inst
+
+	Mux16(a= inst , b= outALU,sel= outi,out= outInst);	
+
+	// (A Register)
+	// Input = Mux1-output; Output = Mux2-input, PC-input
+	// Kommentar: A registret ska ladda in sitt nya ord om 
+	// det visar sig att om d1-biten är 0 och i-biten är 1
+	// då vid en A-inst tolkas instruktionen som en konstant och 
+	// ska sparas i A reg och behöver inte bry sig om d1-biten.
+	// Då ska även 15-bits skickas som adress till Minnet
+
+	Or(a =instruction[5], b = notouti, out= loadA);	
+	ARegister(in= outInst, load= loadA, out= outA, out[0..14] = addressM); 
+										
+	// (Mux2)
+	// Input = A reg, Mem[A]; Output = ALU-input
+	// Kommentar: a-biten inom beräkningsinstruktionen bestämmer
+	// om värdet från A reg. eller input från minnet ska skickas till ALUn
+	Mux16(a= outA ,b= inM,sel= outa, out= outAM);
+	
+	// (ALU)
+	// Kommentar: Kollar om i-biten är 1 (C) eller 0(A), vilket spelar roll om 
+	// ALUn kontrollbitar ska vara aktiva eller inte
+	And(a = instruction[11], b = outi, out = inzx);	//c1
+	And(a = instruction[10], b = outi, out = innx);	//c2
+	And(a = instruction[9], b = outi, out = inzy);	//c3
+	And(a = instruction[8], b = outi, out = inny);	//c4
+	And(a = instruction[7], b = outi, out = inf);	//c5
+	And(a = instruction[6], b = outi, out = inno);	//c6
+	
+	// Beräkning
+	// Kommentar: Beräknings av ALU sker här
+	ALU(x= outD,y= outAM, zx= inzx,nx= innx,zy= inzy,ny= inny,f= inf,no= inno,out= outM ,out = outALU, zr= zero,ng= nega);
+
+	// (D Register)
+	// Input = ALU-output; Output = ALU-input
+	// Kommentar: Om d2 och i-biten är 1 ska ALUns output
+	// sparas i D Regisret
+	And(a =instruction[4], b = outi, out= loadD);
+	DRegister(in= outALU , load= loadD , out= outD ); 
+	
+	// (Memory[A])
+	// Koll på hur hoppet ska gå till
+	// Kommentar: Om d3 och i-bit är 1 ska man skriva till Minnet
+	And(a = instruction[3], b = outi, out = writeM); //Kollar c-inst och d3
+	
+	// (PC)
+	// Kommentar: Kollar om ALUns beräkning är positiv
+	Or(a = zero, b = nega, out = outposZ);	
+	Not(in = outposZ, out = outpos); 
+	
+	// Kommentar: För j3 = sann ska outALU>0 och  j3-biten = 1 i instruktionen
+	// För j2 = sann ska outALU=0 och  j2-biten = 1 i instruktionen
+	// För j1 = sann ska outALU<0 och  j1-biten = 1 i instruktionen
+	And(a = instruction[0], b = outpos, out = outj3); //j3
+	And(a = instruction[1], b = zero, out = outj2);	 //j2
+	And(a = instruction[2], b = nega, out = outj1);	 //j1
+
+	// Kommentar: Kollar om någon av j är 1, isåfall ska ett hopp göras
+	Or8Way(in[0]= outj1, in[1]= outj2, in[2]=outj3, in[3..7]= false,out= outload);
+	And(a = outload, b = instruction[15], out= outloadtrue);
+
+	// Kommentar: Ser till att information till nästa cykel fås
+	// Om vi har ett hopp ska PC ladda in A:s output. Annars ska
+	// PCn inkrementera med 1.
+	// Om reset är 1 ska pc sättas till 0
+	
+	PC(in= outA,load= outloadtrue,inc= true,reset= reset, out[0..14]= pc, out[15]=false);
+	
+
+	
+}

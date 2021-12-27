@@ -1,0 +1,120 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/12/Memory.jack
+
+/**
+ * Memory operations library.
+ */ 
+class Memory {
+    static Array ram;
+    static Array freeList;
+
+    static int heapBase;
+    static int heapBottom;
+    static int next;
+    static int len;
+
+    /** Initializes memory parameters. */
+    function void init() {
+        let ram = 0;
+        let heapBase = 2048;
+        let heapBottom = 16383;
+        
+        let freeList = heapBase;
+        let next = 1;
+        let len = 0;
+
+        let freeList[next] = null;
+        let freeList[len] = heapBottom-heapBase; // Account for next and length slot
+        return;
+    }
+
+    /** Returns the value of the main memory at the given address. */
+    function int peek(int address) {
+        return ram[address];
+    }
+
+    /** Sets the value of the main memory at this address
+     *  to the given value. */
+    function void poke(int address, int value) {
+        let ram[address] = value;
+        return;
+    }
+
+
+    // Check for block in free list that has size > size +2 new block,
+    // Returns the first block that has this feature in the linked list
+    // but if the block can't be found, null is returned.
+    function Array firstfit(int size) {   
+        var Array current_block;                
+        var int current_size;
+        let current_block = freeList;
+        let current_size = current_block[len];
+
+        // Going through linked list, break if current size is smaller than
+        // allocating size, also when current block is null
+        while((current_size < size) & (~(current_block = null))) {
+            let current_block = current_block[next];
+            let current_size = current_block[len];
+        }
+
+        return current_block;
+    
+    }
+    // }
+
+    function int alloc(int size) {
+        //Initialize variables 
+        var Array newblock;
+        var Array current_block;                
+        var int current_size;
+        let current_block = freeList;
+        let current_size = current_block[len];
+        
+        //Searching for free block with firstfit alg.
+        let current_block = Memory.firstfit(size);
+        
+        // Return null is current block is null
+        if (current_block = null){
+            return null;
+        }
+        //Adding block to reversed ascending order
+        //Updating freelist without the block size called
+        else {
+            let newblock = current_block + size +2;
+		    let newblock[len] = current_block[len] - size-2;
+		    let newblock[next] = current_block[next];
+            let freeList = newblock;
+            let current_block[next] = null;
+            let current_block[len] = size;
+
+            return current_block;
+        }
+    }
+
+    // function Array findblock(int object){
+    //     var Array preblock;
+    //     if (freeList > object){
+    //         return null;
+    //     }
+    //     let preblock = freeList;
+    //     //preblock[next] != null & preblock[next] < object
+    //     while(~(preblock[next] = null) & (preblock[next] < object)){
+    //         let preblock = preblock[next];
+    //     }
+    //     return preblock;
+    // }
+
+
+    // /** De-allocates the given object and heaps its space. */
+    function void deAlloc(int object) {
+
+        // Setting freeList to ram and updating object to freelist
+        // Which erases previous mem
+        let ram[object] = freeList;
+	    let freeList = object;
+
+        return;
+    }    
+}

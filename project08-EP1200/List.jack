@@ -1,0 +1,78 @@
+class List {
+	field int data;
+	field List next;
+
+	/* Creates a new List object. */
+	constructor List new(int car, List cdr) {
+		let data = car;
+		let next = cdr;
+		return this;
+	}
+
+	/* Disposes this List by recursively disposing its tail. */
+	method void dispose() {
+		if (~(next =  null)) {
+			do next.dispose();
+		}
+		// Use an OS routine to recycle the memory held by this object.
+		do Memory.deAlloc(this);
+		return;
+	}
+
+	/* Prints the list*/
+
+	method void print() {
+		do Output.printString(" -> ");
+		do Output.printInt(data);
+		if (~(next =  null)) {
+			do next.print();
+		}
+		return;
+	}
+
+	/* Inserts the argument in the right position of the list (ascending order)*/
+	method void insertInOrder(int ins){
+		var List prevnext;
+		var List new_node;
+
+		if (data<ins) { //If current value is smaller than input
+			if (~(next = null)) { // Check if next value is not null
+				do next.insertInOrder(ins);
+			}
+
+			else { // If next value is null
+				let new_node = List.new(ins, null);
+				let next = new_node;
+			}
+		}
+
+		else { // If current value is >= than input
+			let prevnext = next;
+			let new_node = List.new(data, prevnext);
+			let next = new_node;
+			let data = ins;
+
+		}
+		return;
+	}
+	
+
+	/* Searches the argument in the list, if found, it returns the corresponding List object*/
+	method List find(int toFind){
+		var List cond;
+		if (data = toFind) { //If data is the same as toFind
+			let cond = this;
+			return cond;
+		}
+		else {
+			if (~(next = null)){
+				let cond = next.find(toFind);
+			}
+			else {
+				let cond = null;
+			}
+		}
+		return cond;
+		
+	}
+} 
